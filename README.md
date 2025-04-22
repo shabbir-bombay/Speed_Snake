@@ -1,16 +1,32 @@
-# 🐍 Snake Game (with SDL2 GUI)
+# 🐍 Speed Snake — COMP 173 Final Project
 
-This project is a classic Snake game implemented in C with a graphical interface using **SDL2** and **SDL2_ttf**. The snake collects loot, and the game ends when all loot is collected (win) or the timer runs out (lose). The game uses shared memory and semaphores for multiprocess coordination, simulating a mini operating system concept.
+## 🎮 Game Overview
 
-## 📦 Features
+### Game Title
+**Speed Snake**
 
-- 🐍 Snake movement using `W`, `A`, `S`, `D`
-- 🍎 Random loot generation using forked child processes
-- 🧠 Inter-process synchronization via POSIX shared memory and semaphores
-- ⏱️ Timer shown in GUI using SDL2_ttf
-- 🎉 Win or lose message displayed before exit
+### Game Summary
+Speed Snake is a real-time, arcade-style twist on the classic snake game built entirely in C. The game was developed as a final project for an Operating Systems course, featuring concurrency and synchronization to simulate real-world process behavior. Players navigate the snake to collect loot under time pressure, with a dynamic GUI rendered using SDL2.
 
-## 🖥️ Requirements
+### Core Gameplay Loop
+Players use the keyboard to move the snake across a grid, collecting randomly appearing loot. A timer constantly ticks down, creating urgency. The game ends when the player either collects all loot (win) or the timer expires (lose). Loot spawns are managed by background processes.
+
+---
+
+
+## 🎮 Snake in Action
+
+<img width="396" alt="Gameplay_SS" src="https://github.com/user-attachments/assets/f616659f-d236-4ae3-b952-f38f482e15bb" />
+
+---
+
+## 🎥 Demo Video
+Watch the full gameplay demo on YouTube:  
+👉 [Speed Snake - COMP 173 Final Project](https://youtu.be/0qFFk3LxZRA)
+
+---
+
+## 🖥️ Requirements & 🛠️ Setup
 
 Make sure you have the following libraries installed:
 
@@ -34,8 +50,11 @@ brew install sdl2 sdl2_ttf
 gcc Game.c -o snake_game_sdl `sdl2-config --cflags --libs` -lSDL2_ttf -lpthread
 ```
 
-## 🕹️ Controls
+---
 
+## 🕹️ Gameplay Mechanics
+
+### Controls
 | Key | Action        |
 |-----|---------------|
 | W   | Move Up       |
@@ -44,27 +63,44 @@ gcc Game.c -o snake_game_sdl `sdl2-config --cflags --libs` -lSDL2_ttf -lpthread
 | D   | Move Right    |
 | ⌘Q / Alt+F4 | Quit |
 
-## 📁 File Overview
 
-| File           | Description                                      |
-|----------------|--------------------------------------------------|
-| `Game.c`       | Main game logic and SDL rendering                |
-| `README.md`    | This file                                        |
+### Core Mechanics
+- Snake movement across a grid
+- Random loot generation
+- Timer countdown
+- Collision with loot increases score
 
-## 🧠 Concepts Used
+### Level Progression
+There is a single level/grid. The challenge increases with time pressure.
 
-- SDL2 rendering and event handling
-- Font rendering with SDL2_ttf
-- POSIX shared memory and `semaphore.h`
-- Process management with `fork()`
-- Terminal input capture using pipes
+### Win/Loss Conditions
+- **Win**: Collect all loot before the timer runs out.
+- **Lose**: Time expires before collecting all loot.
 
-## 🎮 Snake in Action
+---
 
-<img width="396" alt="Gameplay_SS" src="https://github.com/user-attachments/assets/f616659f-d236-4ae3-b952-f38f482e15bb" />
+## 💻 Operating Systems Concepts Used
 
-## 📺 Watch the Gameplay
+### 1. Shared Memory
+- **Game Mechanic**: Shared game state accessed by multiple processes
+- **Snippet**: `mmap()` used to create shared game state between processes
 
-Check out the full gameplay demo on YouTube:  
-👉 [Speed Snake - COMP 173 Final Project](https://youtu.be/0qFFk3LxZRA)
+### 2. Semaphores
+- **Game Mechanic**: Prevent concurrent write conflicts to the game state
+- **Snippet**: `sem_wait(mutex); ... sem_post(mutex);`
+
+### 3. Forking
+- **Game Mechanic**: Spawning loot generator processes
+- **Snippet**: `if (fork() == 0) { loot_process(); exit(0); }`
+
+### 4. Pipes
+- **Game Mechanic**: Captures keyboard input asynchronously
+- **Snippet**: `pipe(pipefd); read(pipefd[0], &input, 1);`
+
+### 5. Timer
+- **Game Mechanic**: Timer for game-over logic and GUI updates
+- **Snippet**: `time(NULL) - game->start_time`
+
+---
+
 
