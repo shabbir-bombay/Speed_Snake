@@ -22,7 +22,7 @@ Players use the keyboard to move the snake across a grid, collecting randomly ap
 
 ## 🎥 Demo Video
 Watch the full gameplay demo on YouTube:  
-👉 [Speed Snake - COMP 173 Final Project](https://youtu.be/0qFFk3LxZRA)
+👉 [Speed Snake - COMP 173 Final Project](https://youtu.be/btDZ2FZJvQY)
 
 ---
 
