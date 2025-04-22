@@ -62,3 +62,9 @@ gcc Game.c -o snake_game_sdl `sdl2-config --cflags --libs` -lSDL2_ttf -lpthread
 ## 🎮 Snake in Action
 
 <img width="396" alt="Gameplay_SS" src="https://github.com/user-attachments/assets/f616659f-d236-4ae3-b952-f38f482e15bb" />
+
+## 📺 Watch the Gameplay
+
+Check out the full gameplay demo on YouTube:  
+👉 [Speed Snake - COMP 173 Final Project](https://youtu.be/0qFFk3LxZRA)
+
