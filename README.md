@@ -13,7 +13,6 @@ Players use the keyboard to move the snake across a grid, collecting randomly ap
 
 ---
 
-
 ## 🎮 Snake in Action
 
 <img width="396" alt="Gameplay_SS" src="https://github.com/user-attachments/assets/f616659f-d236-4ae3-b952-f38f482e15bb" />
@@ -63,7 +62,6 @@ gcc Game.c -o snake_game_sdl `sdl2-config --cflags --libs` -lSDL2_ttf -lpthread
 | D   | Move Right    |
 | ⌘Q / Alt+F4 | Quit |
 
-
 ### Core Mechanics
 - Snake movement across a grid
 - Random loot generation
@@ -82,25 +80,48 @@ There is a single level/grid. The challenge increases with time pressure.
 ## 💻 Operating Systems Concepts Used
 
 ### 1. Shared Memory
-- **Game Mechanic**: Shared game state accessed by multiple processes
-- **Snippet**: `mmap()` used to create shared game state between processes
+- **Game Mechanic**: Shared game state accessed by multiple processes and persistent lowest score tracking
+- **Snippet**: `mmap()` used to create shared memory segments `/snake_game_shm` and `/snake_lowest_score_shm`
 
 ### 2. Semaphores
-- **Game Mechanic**: Prevent concurrent write conflicts to the game state
+- **Game Mechanic**: Prevent concurrent write conflicts to game state and score records
 - **Snippet**: `sem_wait(mutex); ... sem_post(mutex);`
 
 ### 3. Forking
-- **Game Mechanic**: Spawning loot generator processes
+- **Game Mechanic**: Background processes spawn loot at intervals
 - **Snippet**: `if (fork() == 0) { loot_process(); exit(0); }`
 
 ### 4. Pipes
-- **Game Mechanic**: Captures keyboard input asynchronously
+- **Game Mechanic**: Handles keyboard input from a separate child process
 - **Snippet**: `pipe(pipefd); read(pipefd[0], &input, 1);`
 
 ### 5. Timer
-- **Game Mechanic**: Timer for game-over logic and GUI updates
+- **Game Mechanic**: Game duration countdown and GUI time tracking
 - **Snippet**: `time(NULL) - game->start_time`
 
 ---
 
+## 🆕 Extra Features
 
+- 🧑‍🎮 **Player Name Input**: Personalizes gameplay and scorekeeping
+- 🏆 **Record Tracker**: Shows and updates lowest score record across sessions
+- 📈 **Score + Timer UI**: Shown dynamically during gameplay
+- ♻️ **Shared Memory Persistence**: Record survives multiple runs
+
+---
+
+## 🧹 Shared Memory Cleanup
+
+If you want to manually delete the shared memory used by the game:
+
+### Remove game state memory:
+```bash
+rm /dev/shm/snake_game_shm
+```
+
+### Remove score tracking memory:
+```bash
+rm /dev/shm/snake_lowest_score_shm
+```
+
+These commands are useful if you want to reset the game state and lowest score record.
