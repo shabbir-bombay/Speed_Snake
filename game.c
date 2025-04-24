@@ -1,5 +1,6 @@
 // SDL version of the snake game with GUI using SDL2
-// Updated: Timer moved to bottom margin of screen
+// rm /dev/shm/snake_lowest_score_shm
+// gcc Game.c -o snake_game_sdl `sdl2-config --cflags --libs` -lSDL2_ttf -lpthread
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
@@ -18,14 +19,17 @@
 
 #define GRID_SIZE 10
 #define SHM_NAME "/snake_game_shm"
+#define SHM_SCORE_NAME "/snake_lowest_score_shm"
 #define LOOT_SYMBOL '*'
 #define SNAKE_HEAD 'S'
 #define LOOT_PROCESSES 2
 #define GAME_DURATION 300
 #define CELL_SIZE 40
 #define TEXT_HEIGHT 40
+#define HEADER_HEIGHT 40
 #define WINDOW_WIDTH (GRID_SIZE * CELL_SIZE)
-#define WINDOW_HEIGHT (GRID_SIZE * CELL_SIZE + TEXT_HEIGHT)
+#define WINDOW_HEIGHT (GRID_SIZE * CELL_SIZE + TEXT_HEIGHT + HEADER_HEIGHT)
+#define MAX_NAME_LENGTH 50
 
 typedef struct {
     char grid[GRID_SIZE][GRID_SIZE];
@@ -35,10 +39,19 @@ typedef struct {
     int direction;
     time_t start_time;
     int game_over;
+    char player_name[MAX_NAME_LENGTH];
 } GameState;
 
+typedef struct {
+    int lowest_score;
+    int score_exists;  // Flag to indicate if a previous score exists
+    char player_name[MAX_NAME_LENGTH];  // Name of the player with the lowest score
+} ScoreState;
+
 GameState *game;
+ScoreState *score_state;
 sem_t *mutex;
+sem_t *score_mutex;
 int pipefd[2];
 
 void place_loot(int count) {
@@ -76,9 +89,25 @@ void draw_grid_sdl(SDL_Renderer *renderer, TTF_Font *font) {
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
+    // Display current player name at the top
+    char player_text[MAX_NAME_LENGTH + 20];
+    snprintf(player_text, sizeof(player_text), "Player: %s", game->player_name);
+    draw_text(renderer, font, player_text, 10, 10);
+
+    // Display previous record holder info at the top
+    char record_text[MAX_NAME_LENGTH + 50];
+    if (score_state->score_exists) {
+        snprintf(record_text, sizeof(record_text), "Record: %s - %d", 
+                 score_state->player_name, score_state->lowest_score);
+    } else {
+        snprintf(record_text, sizeof(record_text), "Record: None yet");
+    }
+    draw_text(renderer, font, record_text, WINDOW_WIDTH - 200, 10);
+
+    // Display grid with offset for the header
     for (int i = 0; i < GRID_SIZE; i++) {
         for (int j = 0; j < GRID_SIZE; j++) {
-            SDL_Rect cell = { j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE };
+            SDL_Rect cell = { j * CELL_SIZE, i * CELL_SIZE + HEADER_HEIGHT, CELL_SIZE, CELL_SIZE };
             if (game->grid[i][j] == SNAKE_HEAD)
                 SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
             else if (game->grid[i][j] == LOOT_SYMBOL)
@@ -93,9 +122,16 @@ void draw_grid_sdl(SDL_Renderer *renderer, TTF_Font *font) {
 
     int time_left = GAME_DURATION - (int)(time(NULL) - game->start_time);
     if (time_left < 0) time_left = 0;
+
     char timer_text[32];
-    snprintf(timer_text, sizeof(timer_text), "Time Left: %02d:%02d", time_left / 60, time_left % 60);
-    draw_text(renderer, font, timer_text, 10, GRID_SIZE * CELL_SIZE + 10);
+    snprintf(timer_text, sizeof(timer_text), "Time: %02d:%02d", time_left / 60, time_left % 60);
+
+    char score_text[32];
+    snprintf(score_text, sizeof(score_text), "Score: %d", game->score);
+
+    // Draw bottom status bar
+    draw_text(renderer, font, timer_text, 10, GRID_SIZE * CELL_SIZE + HEADER_HEIGHT + 10);
+    draw_text(renderer, font, score_text, WINDOW_WIDTH - 120, GRID_SIZE * CELL_SIZE + HEADER_HEIGHT + 10);
 
     SDL_RenderPresent(renderer);
 }
@@ -125,27 +161,148 @@ int check_loot_remaining() {
     return 0;
 }
 
+// Initialize the shared memory for the lowest score
+int initialize_shared_score() {
+    int is_new_score = 0;
+    
+    // Try to open existing shared memory first
+    int shm_score_fd = shm_open(SHM_SCORE_NAME, O_RDWR, 0666);
+    
+    if (shm_score_fd == -1) {
+        // Shared memory doesn't exist, create it
+        shm_score_fd = shm_open(SHM_SCORE_NAME, O_CREAT | O_RDWR, 0666);
+        ftruncate(shm_score_fd, sizeof(ScoreState));
+        is_new_score = 1;
+    }
+    
+    // Map the shared memory segment into our address space
+    score_state = mmap(0, sizeof(ScoreState), PROT_READ | PROT_WRITE, MAP_SHARED, shm_score_fd, 0);
+    
+    // Initialize the score state if it's new
+    if (is_new_score) {
+        score_state->score_exists = 0;  // No previous score exists
+        score_state->lowest_score = 0;  // Initialize to 0 (not used until score_exists = 1)
+        strcpy(score_state->player_name, "None");  // Initialize player name
+    }
+    
+    // Create a semaphore for synchronizing access to the score
+    sem_unlink("/snake_score_mutex");
+    score_mutex = sem_open("/snake_score_mutex", O_CREAT, 0644, 1);
+    
+    return is_new_score;
+}
+
+// Get player name input with basic validation
+void get_player_name() {
+    printf("Enter your name (max %d characters): ", MAX_NAME_LENGTH - 1);
+    
+    // Read player name, limiting to MAX_NAME_LENGTH-1 characters to leave room for null terminator
+    if (fgets(game->player_name, MAX_NAME_LENGTH, stdin) == NULL) {
+        // Error or EOF occurred
+        strcpy(game->player_name, "Unknown");
+        return;
+    }
+    
+    // Remove newline if present
+    size_t len = strlen(game->player_name);
+    if (len > 0 && game->player_name[len-1] == '\n') {
+        game->player_name[len-1] = '\0';
+    }
+    
+    // If empty name, use default
+    if (strlen(game->player_name) == 0) {
+        strcpy(game->player_name, "Player");
+    }
+    
+    printf("Welcome, %s! Get ready to play Snake!\n", game->player_name);
+}
+
+// Draw the end screen with left-aligned text
+void draw_end_screen(SDL_Renderer *renderer, TTF_Font *font, int won, int new_record) {
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderClear(renderer);
+    
+    int left_margin = 30;
+    int y_pos = WINDOW_HEIGHT / 3;
+    int line_spacing = 30;
+    
+    // Game result message
+    char result_msg[64];
+    snprintf(result_msg, sizeof(result_msg), "%s", won ? "You Win!" : "Time's Up! You Lose!");
+    draw_text(renderer, font, result_msg, left_margin, y_pos);
+    y_pos += line_spacing;
+    
+    // Player score
+    char score_msg[128];
+    snprintf(score_msg, sizeof(score_msg), "%s's Score: %d", game->player_name, game->score);
+    draw_text(renderer, font, score_msg, left_margin, y_pos);
+    y_pos += line_spacing;
+    
+    // Record information - always show the most current information
+    char record_msg[128];
+    if (score_state->score_exists) {
+        snprintf(record_msg, sizeof(record_msg), "Current Record: %s - %d", 
+                 score_state->player_name, score_state->lowest_score);
+    } else {
+        snprintf(record_msg, sizeof(record_msg), "No Record Yet");
+    }
+    draw_text(renderer, font, record_msg, left_margin, y_pos);
+    y_pos += line_spacing;
+    
+    // New record message if applicable
+    if (new_record) {
+        char congrats_msg[128];
+        snprintf(congrats_msg, sizeof(congrats_msg), 
+                 "NEW RECORD! Congratulations %s!", game->player_name);
+        draw_text(renderer, font, congrats_msg, left_margin, y_pos);
+    }
+    
+    SDL_RenderPresent(renderer);
+}
+
 int main() {
     srand(time(NULL));
 
+    // Initialize the game state shared memory
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     ftruncate(shm_fd, sizeof(GameState));
     game = mmap(0, sizeof(GameState), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     memset(game, 0, sizeof(GameState));
 
+    // Initialize the score shared memory
+    int is_first_run = initialize_shared_score();
+    
+    // If this is the first run, display a message
+    if (is_first_run) {
+        printf("No previous lowest score found. Starting fresh!\n");
+    } else {
+        if (score_state->score_exists) {
+            printf("Previous record: %s with score %d\n", 
+                   score_state->player_name, score_state->lowest_score);
+        } else {
+            printf("Previous lowest score status: Not available\n");
+        }
+    }
+
+    // Get player name before starting the game
+    get_player_name();
+
+    // Create and initialize mutex for synchronization
     sem_unlink("/snake_mutex");
     mutex = sem_open("/snake_mutex", O_CREAT, 0644, 1);
 
+    // Initialize grid
     for (int i = 0; i < GRID_SIZE; i++)
         for (int j = 0; j < GRID_SIZE; j++)
             game->grid[i][j] = ' ';
 
+    // Initialize snake and game parameters
     game->snake_x = 5;
     game->snake_y = 5;
-    game->score = 1;
+    game->score = 0;
     game->grid[5][5] = SNAKE_HEAD;
     game->start_time = time(NULL);
-
+    
     place_loot(10);
 
     for (int i = 0; i < LOOT_PROCESSES; i++) {
@@ -168,7 +325,8 @@ int main() {
 
     SDL_Init(SDL_INIT_VIDEO);
     TTF_Init();
-    SDL_Window *window = SDL_CreateWindow("Snake Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+    SDL_Window *window = SDL_CreateWindow("Snake Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
+                                         WINDOW_WIDTH, WINDOW_HEIGHT, 0);
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     TTF_Font *font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18);
 
@@ -209,11 +367,33 @@ int main() {
         usleep(150000);
     }
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderClear(renderer);
-    const char *msg = won ? "You Win!" : "Time's Up! You Lose!";
-    draw_text(renderer, font, msg, WINDOW_WIDTH / 2 - 70, WINDOW_HEIGHT / 2);
-    SDL_RenderPresent(renderer);
+    // Variable to track if a new record was set
+    int new_record = 0;
+    
+    // Update lowest score ONLY if the game is won
+    if (won) {
+        sem_wait(score_mutex);
+        if (!score_state->score_exists || game->score < score_state->lowest_score) {
+            score_state->lowest_score = game->score;
+            score_state->score_exists = 1;  // Now we have a score
+            
+            // Update the record holder's name
+            strncpy(score_state->player_name, game->player_name, MAX_NAME_LENGTH - 1);
+            score_state->player_name[MAX_NAME_LENGTH - 1] = '\0'; // Ensure null termination
+            
+            printf("New record! %s achieved lowest score of %d\n", 
+                   game->player_name, game->score);
+            
+            new_record = 1;
+        }
+        sem_post(score_mutex);
+    } else {
+        printf("Game lost or timed out. Record not updated.\n");
+    }
+    
+    // Draw the end screen with the updated score information
+    draw_end_screen(renderer, font, won, new_record);
+    
     sleep(3);
 
     TTF_CloseFont(font);
@@ -222,10 +402,18 @@ int main() {
     SDL_DestroyWindow(window);
     SDL_Quit();
 
+    // Clean up resources
     sem_close(mutex);
     sem_unlink("/snake_mutex");
+    sem_close(score_mutex);
+    sem_unlink("/snake_score_mutex");
+    
     munmap(game, sizeof(GameState));
     shm_unlink(SHM_NAME);
-
+    
+    munmap(score_state, sizeof(ScoreState));
+    // Note: We don't unlink the score shared memory so it persists
+    // between game sessions
+    
     return 0;
 }
